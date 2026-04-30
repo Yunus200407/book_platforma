@@ -71,13 +71,24 @@ async function loadBooks() {
   document.getElementById('booksContainer').innerHTML =
     '<div class="loading-wrap"><div class="spinner"></div></div>';
 
-  const res = await fetch(`${API}/books`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  try {
+    const res = await fetch(`${API}/books`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
 
-  if (res.status === 401) return logout();
-  const books = await res.json();
-  renderBooks(books);
+    if (res.status === 401) return logout();
+    if (!res.ok) {
+      showMsg('appMsg', 'Kitoblarni yuklashda xatolik yuz berdi', 'err');
+      document.getElementById('booksContainer').innerHTML = '';
+      return;
+    }
+
+    const books = await res.json();
+    renderBooks(books);
+  } catch {
+    showMsg('appMsg', 'Server bilan ulanishda xatolik yuz berdi', 'err');
+    document.getElementById('booksContainer').innerHTML = '';
+  }
 }
 
 function renderBooks(books) {
@@ -91,17 +102,25 @@ function renderBooks(books) {
   }
   el.innerHTML = `<div class="books-grid">${books.map(b => `
     <div class="book-card">
-      <div class="book-spine">${esc(b.title[0].toUpperCase())}</div>
+      <div class="book-spine">${esc((b.title?.[0] || '?').toUpperCase())}</div>
       <div class="book-title">${esc(b.title)}</div>
       <div class="book-author">${esc(b.author)}</div>
       ${b.description ? `<div class="book-desc">${esc(b.description)}</div>` : ''}
       <div class="book-actions">
-        <button class="btn btn-ghost btn-sm" onclick="downloadBook(${b.id}, '${esc(b.title)}')">&#x2193; Yuklab olish</button>
+        <button class="btn btn-ghost btn-sm js-download-btn" data-id="${b.id}" data-title="${escAttr(b.title)}">&#x2193; Yuklab olish</button>
         <button class="btn btn-ghost btn-sm" onclick="openEditModal(${b.id})">&#x270E;</button>
         <button class="btn btn-danger btn-sm" onclick="openDeleteModal(${b.id})">&#x2715;</button>
       </div>
     </div>
   `).join('')}</div>`;
+
+  el.querySelectorAll('.js-download-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = Number(btn.dataset.id);
+      const title = btn.dataset.title || 'book';
+      downloadBook(id, title);
+    });
+  });
 }
 
 async function downloadBook(id, title) {
@@ -133,6 +152,13 @@ async function openEditModal(id) {
   const res = await fetch(`${API}/books/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   });
+
+  if (res.status === 401) return logout();
+  if (!res.ok) {
+    showMsg('appMsg', 'Kitob ma\'lumotini olishda xato', 'err');
+    return;
+  }
+
   const b = await res.json();
   document.getElementById('editBookId').value = id;
   document.getElementById('modalTitle').textContent = 'Kitobni tahrirlash';
@@ -188,10 +214,17 @@ function closeDeleteModal() {
 
 async function confirmDelete() {
   if (!deleteTargetId) return;
-  await fetch(`${API}/books/${deleteTargetId}`, {
+  const res = await fetch(`${API}/books/${deleteTargetId}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` }
   });
+
+  if (res.status === 401) return logout();
+  if (!res.ok) {
+    showMsg('appMsg', 'O\'chirishda xatolik yuz berdi', 'err');
+    return;
+  }
+
   closeDeleteModal();
   loadBooks();
 }
@@ -209,6 +242,15 @@ function esc(str) {
     .replace(/</g,'&lt;')
     .replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;');
+}
+
+function escAttr(str) {
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
 }
 
 document.getElementById('bookModal').addEventListener('click', e => {

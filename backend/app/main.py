@@ -3,10 +3,15 @@ from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import Any
+from pathlib import Path
 
 from app.database import get_db, engine
 from app import models, schemas, auth
+
+import httpx
+from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
+
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -94,4 +99,35 @@ def download_book(id: int, db: Session = Depends(get_db), current_user: models.U
     book = db.query(models.Book).filter(models.Book.id == id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-    return FileResponse(path=book.path, filename=f"{book.title}.pdf", media_type="application/octet-stream")
+
+    # Internet URL bo'lsa
+    if book.path.startswith("http://") or book.path.startswith("https://"):
+        client = httpx.Client(follow_redirects=True, timeout=30.0)
+        try:
+            request = client.build_request("GET", book.path)
+            response = client.send(request, stream=True)
+            response.raise_for_status()
+        except httpx.HTTPError:
+            client.close()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Could not fetch remote file",
+            )
+
+        def close_stream() -> None:
+            response.close()
+            client.close()
+
+        return StreamingResponse(
+            response.iter_bytes(),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={book.title}.pdf"},
+            background=BackgroundTask(close_stream),
+        )
+
+    # Lokal fayl bo'lsa
+    file_path = Path(book.path)
+    if not file_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    return FileResponse(path=file_path, filename=f"{book.title}.pdf", media_type="application/octet-stream")
