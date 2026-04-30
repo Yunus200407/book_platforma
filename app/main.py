@@ -12,7 +12,7 @@ models.Base.metadata.create_all(bind=engine)
 app = FastAPI(title="Book Platform")
 
 
-# --- Auth ---
+# OAuth 
 
 @app.post("/auth/register", response_model=schemas.UserRead)
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -35,7 +35,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     return {"access_token": token, "token_type": "bearer"}
 
 
-# --- Books ---
+#Books
 
 @app.get("/books", response_model=list[schemas.BookRead])
 def get_books(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
@@ -58,6 +58,16 @@ def create_book(book: schemas.BookCreate, db: Session = Depends(get_db), current
     db.refresh(new_book)
     return new_book
 
+@app.put("/books/{id}", response_model=schemas.BookRead)
+def replace_book(id: int, book: schemas.BookCreate, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    existing = db.query(models.Book).filter(models.Book.id == id).first()
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    for field, value in book.model_dump().items():
+        setattr(existing, field, value)
+    db.commit()
+    db.refresh(existing)
+    return existing
 
 @app.patch("/books/{id}", response_model=schemas.BookRead)
 def update_book(id: int, data: schemas.BookUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
